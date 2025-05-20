@@ -8,6 +8,9 @@ Can individual attitudes toward democracy, institutions, and freedom predict whe
 ### Introduction
 We used a Random Forest and Logistic Regression model on survey data to predict protest participation.
 
+### Conclusion
+blah blah blah
+
 ### Files
 - [View the Report (HTML)](./finalProject.html)
 - [View the Report (PDF)](./finalProject.pdf)
