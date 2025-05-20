@@ -1,0 +1,314 @@
+---
+title: "final project"
+output: html_document
+date: "2025-05-18"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(randomForest)
+library(caret)
+```
+
+We began by using a random forest on 13 specific variables (protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education, age, leftrightscale, democracy_score, trust_score, economic_score, freedom_score) to determine the most important variables to predicting whether someone would attend a protest. We decided to choose these variables and filter out the others because they were the original list of predictors that we used to create the protest_attend column/variable [AMUNA double check]. We decided on using random forest because it was a supervised model and it was one that we were most familiar with. We also thought that ranger would work well with our large dataset that contains both categorical and numerical values.
+
+RANDOM FOREST on the 13 chosen variables
+```{r}
+set.seed(1)
+
+protestData <- read.csv("cleandata.csv")
+
+protestData <- protestData |> 
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+protestDataClean13vars <- protestData |> 
+                select(protest_attend, religion, religiondevout, socioeconclass, 
+                       incomeenough, race, education, age, leftrightscale,
+                       democracy_score, trust_score, economic_score, freedom_score) |>
+  na.omit() |>
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+#looking at data without NAs just to see which variables are most important
+
+
+rf_NAs <- ranger(protest_attend ~ . - protest_label -protest_engagement_score1,
+             data = protestDataClean13vars,
+             importance = "impurity")
+
+rf_NAs
+rf_NAs$confusion.matrix
+sort(rf_NAs$variable.importance)
+#prediction error: 35% , 65% accurate
+#predicting 0s (68.1% accurate), predicting 1s (69% accurate) 
+
+table(protestData$protest_attend)
+#about same amount of 0s/1s
+```
+When we filter out all NAs, we find that the most important variables in order of most to least important are: trust_score, age, economic_score,freedom_score, democracy_score,leftrightscale, socioeconclass, race, education, religiondevout, incomeenough, religion.
+
+
+
+Checking if there are NAs in the top 5 predictors from protestData
+```{r}
+colSums(is.na(protestData |> 
+                select(protest_attend, trust_score, age, economic_score,freedom_score, democracy_score)))
+```
+
+
+The variables protest_attend and freedom_score have NAs so we have to impute:
+```{r}
+set.seed(1)
+library(mice)
+
+imputedData <- mice(protestData |> select(freedom_score, protest_attend),
+                         method = "rf",
+                         seed = 1)
+
+completeData <- complete(imputedData)
+
+#fill in NAs with complete data
+protestData$freedom_score <- completeData$freedom_score
+protestData$protest_attend <- completeData$protest_attend
+ 
+
+#Check to see if there are still NAs
+protestDataClean13vars <- protestData |> 
+                select(protest_attend, religion, religiondevout, socioeconclass, 
+                       incomeenough, race, education, age, leftrightscale,
+                       democracy_score, trust_score, economic_score, freedom_score) |>
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+colSums(is.na(protestDataClean13vars |> 
+                select(protest_attend, freedom_score, trust_score, economic_score, democracy_score, age)))
+```
+Now that there are no more NAs in the original dataset, we will run random forest using the top 5 predictor variables
+
+
+```{r}
+set.seed(1)
+rf <- ranger(protest_attend ~ trust_score+age+economic_score+freedom_score+democracy_score,
+             data = protestDataClean13vars,
+             importance = "impurity")
+
+rf
+rf$confusion.matrix
+
+```
+We see that the prediction error is about the same when we ran random forest on the data that omitted the NAs. The model is slightly better at predicting 1s (63% right) vs predicting 0s (67% right).
+
+
+Instead of imputing data using mice, what if we did something more naive such as imputing data using mean/median?
+```{r}
+set.seed(1)
+#reload original protestData
+protestData <- read.csv("cleandata.csv")
+protestData <- protestData |> 
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+#select columns with NAs, find median, and update the columns in protestData
+protestDataNoNA <- protestData |>
+  select( freedom_score)
+
+medianFreedomScore <- median(protestDataNoNA$freedom_score)
+
+protestDataMedianAsNAs <- protestDataClean13vars |>
+    mutate(freedom_score = case_when(is.na(freedom_score) ~ medianFreedomScore, TRUE ~ freedom_score)) |>
+  filter(!is.na(protest_attend)) #gets rid of 6 missing protest_attend NA values instead of calculating median of a categorical variable
+
+rfMedians <- ranger(protest_attend ~ trust_score+age+economic_score+freedom_score+democracy_score,
+             data = protestDataMedianAsNAs,
+             importance = "impurity")
+
+rfMedians
+rfMedians$confusion.matrix
+```
+When imputing data with median values, the predictions are slightly worse (40.1% prediction error) when compared to models using imputed data.
+
+
+Training/testing RF with the imputed data from mice/complete since its slightly better
+```{r}
+#reloading protestData/protestDataClean13vars with imputed NA data
+protestData <- read.csv("stats0218_finaldata.csv")
+
+protestData <- protestData |> 
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+protestData$freedom_score <- completeData$freedom_score
+protestData$protest_attend <- completeData$protest_attend
+
+protestDataClean13vars <- protestData |> 
+                select(protest_attend, religion, religiondevout, socioeconclass, 
+                       incomeenough, race, education, age, leftrightscale,
+                       democracy_score, trust_score, economic_score, freedom_score) |>
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+colSums(is.na(protestData |> 
+                select(protest_attend, freedom_score, trust_score, economic_score, democracy_score, age)))
+
+#training/testing
+set.seed(2)
+split <- sample(1:nrow(protestDataClean13vars), 0.5*nrow(protestDataClean13vars))
+train <- protestDataClean13vars[split,]
+test <- protestDataClean13vars[-split, ]
+
+rfTrain <- ranger(protest_attend ~ trust_score+age+economic_score+freedom_score+democracy_score,
+             data = train,
+             importance = "impurity")
+
+rfTrainPreds <- predict(rfTrain, data = test)
+table(rfTrainPreds$predictions, test$protest_attend)
+```
+From the table we see that:
+Predicting 0s: 65.4% accuracy
+Predicting 1s: 60.9% 
+Overall accuracy: 63%
+
+This tells us that the model has an overall accuracy of 63%, but is slightly better at predicting 0s (when someone does not attend the protest). An overall accuracy of 63% is better than average, but not by much. Instead of limiting our model to the 13 variables, our group decided to try using the entire dataset to see if other predictor variables might be better. 
+
+
+We wanted to see if using logistic regression to find the top 8 or 10 variables from the whole dataset would give us a better algorithm. 
+
+```{r}
+library(ranger)
+protest_data <- read.csv("cleandata.csv")
+sum(is.na(protest_data$protest_attend))
+
+protest_data <- protest_data |>
+  mutate(protest_attend = as.factor(protest_attend)) |>
+  filter(!is.na(protest_attend))
+
+rfAll <- ranger(protest_attend ~ .,
+             data = protest_data,
+             importance = "impurity")
+  
+sort(rfAll$variable.importance, decreasing = TRUE)[1:10]
+
+```
+Since protest_engagement_score1 and protest_label are practically the same as the protest_attend column, I took out those two variables from the top 10 and made a list of the top 8 most important variables: authdemonst, protestinsocmedia, nonauthdemonst, opinionplatform, P45ST_A, talkoftenpolitics, workforcommunity, and interestinpolitics. 
+
+ADD EXPLANATION OF EACH VARIABLE?
+
+# Imputing missing data
+```{r}
+colSums(is.na(protest_data |> 
+                select(authdemonst, protestinsocmedia, nonauthdemonst, opinionplatform, P45ST_A, talkoftenpolitics, workforcommunity, interestinpolitics)))
+
+library(mice)
+
+imputed_data <- mice(protest_data |> 
+                             select(authdemonst, protestinsocmedia, nonauthdemonst, opinionplatform, P45ST_A, talkoftenpolitics, workforcommunity, interestinpolitics),
+                         method = "rf",
+                         seed = 1)
+
+complete_alldata <- complete(imputed_data)
+
+#Add back protest_attend
+complete_alldata$protest_attend <- protest_data$protest_attend
+
+#Check to see if there are still NAs
+colSums(is.na(complete_alldata))
+
+```
+No more NAs moving onto RF with top 8 variables instead.
+
+# Split the data into train/test
+```{r}
+set.seed(123) 
+sample_index <- sample(nrow(complete_alldata), size = 0.5 * nrow(complete_alldata))
+train_data <- complete_alldata[sample_index, ]
+test_data <- complete_alldata[-sample_index, ]
+```
+
+
+# Using our algorithm on the train/test data
+```{r}
+library(caret)
+
+rfTopTen <- ranger(
+  formula = protest_attend ~ authdemonst + protestinsocmedia + nonauthdemonst + opinionplatform +
+            P45ST_A + talkoftenpolitics + workforcommunity + interestinpolitics,
+  data = train_data,
+  importance = "impurity"
+)
+
+
+test_preds <- predict(rfTopTen, data = test_data)$predictions
+confusionMatrix(as.factor(test_preds), test_data$protest_attend, positive = "1")
+
+```
+
+From the table we see that:
+Predicting 0s: 92.9% accuracy
+Predicting 1s: 95.2% 
+Overall accuracy: 93.9%
+
+This model is significantly stronger than previous model we ran when we just used the variables that were used to create the protest_attend column. These results suggest that our random forest model using the top 8 most important variables—after imputing missing values and doing a 50/50 train/test split—is highly effective at identifying both protestors and non-protestors. 
+
+
+##Trying out GLM/logistic model
+
+We will be using the same top 8 variable from the above code. The GLM (Generalized Linear Model) we used is a type of regression model that extends traditional linear regression to support response variables that follow different distributions. In our case, we used logistic regression, a GLM tailored for binary outcomes like whether someone attended a protest or not. Logistic regression works by estimating the probability that a given input belongs to a particular class (in this case, protestor vs. non-protestor) using the logistic function. 
+
+Before fitting the model, we used predictive mean matching (pmm) during the imputation step to handle missing values. PMM is a method that fills in missing values by finding observed values with similar predicted means and randomly drawing from them. This approach maintains realistic data distributions and is particularly useful when the data is not normally distributed or when preserving observed values is important.
+
+```{r}
+top8_vars <- c(
+  "authdemonst",
+  "protestinsocmedia",
+  "nonauthdemonst",
+  "opinionplatform",
+  "P45ST_A",
+  "talkoftenpolitics",
+  "workforcommunity",
+  "interestinpolitics"
+)
+
+logit_df <- protest_data[, c(top8_vars, "protest_attend")]
+
+imputed <- mice(logit_df, method = "pmm", seed = 123)
+completed_df <- complete(imputed)
+completed_df$protest_attend <- as.factor(protest_data$protest_attend)
+
+```
+
+
+#Split into test/train data
+
+This code chunk performs a logistic regression analysis using the top 8 predictors to classify whether someone attended a protest. First, the dataset (completed_df) is split into training and testing sets using a 50/50 random split. A logistic regression model is then built on the training data using glm() with a binomial family, which is appropriate for binary classification problems like protest attendance. 
+
+The model is used to generate predicted probabilities on the test set, and those probabilities are converted to class predictions using a threshold of 0.5 (if the predicted probability is greater than or equal to 0.5, the individual is classified as having attended the protest). Finally, both the predicted and actual class labels are converted to factors with matching levels, and a confusion matrix is generated to evaluate the model’s performance, focusing on how well it identifies those who did and did not attend protests.
+
+```{r}
+set.seed(123)
+sample_index <- sample(nrow(completed_df), size = 0.5 * nrow(completed_df))
+train_data <- completed_df[sample_index, ]
+test_data <- completed_df[-sample_index, ]
+
+
+logit_model <- glm(protest_attend ~ ., data = train_data, family = "binomial")
+pred_probs <- predict(logit_model, newdata = test_data, type = "response")
+
+#threshold 
+pred_classes <- ifelse(pred_probs >= 0.5, 1, 0)
+pred_classes <- as.factor(pred_classes)
+
+test_data$protest_attend <- as.factor(test_data$protest_attend)
+pred_classes <- factor(pred_classes, levels = levels(test_data$protest_attend))
+
+confusionMatrix(pred_classes, test_data$protest_attend, positive = "1")
+
+```
+
+From the table we see that:
+Predicting 0s: 94.5% accuracy (293 out of 310)
+Predicting 1s: 96.9% accuracy (280 out of 289)
+Overall accuracy: 95.7%
+
+This model performs better than our earlier modsels that used only the variables from the original protest_attend predictor set. By using logistic regression on the top 8 most important variables—after imputing missing values and applying a 50/50 train/test split—we created a model that is highly accurate in identifying both protestors and non-protestors, with particularly low rates of false positives and false negatives. These results suggest that logistic regression is better than our supervised learning algorithm of ranger/random forest for this classification task.
+
+
+
+
