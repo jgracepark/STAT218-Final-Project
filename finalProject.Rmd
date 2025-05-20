@@ -1,0 +1,233 @@
+---
+title: "final project"
+output: html_document
+date: "2025-05-18"
+editor_options: 
+  chunk_output_type: console
+---
+
+We began by using a random forest on 13 specific variables (protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education, age, leftrightscale, democracy_score, trust_score, economic_score, freedom_score) to determine the most important variables to predicting whether someone would attend a protest. We decided to choose these variables and filter out the others because they were the original list of predictors that we used to create the protest_attend column/variable [AMUNA double check]. We decided on using random forest because it was a supervised model and it was one that we were most familiar with. We also thought that ranger would work well with our large dataset that contains both categorical and numerical values.
+
+RANDOM FOREST on the 13 chosen variables
+```{r}
+library(ranger)
+library(dplyr)
+library(tidyverse)
+
+set.seed(1)
+
+protestData <- read.csv("stats0218_finaldata.csv")
+
+protestData <- protestData |> 
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+protestDataClean13vars <- protestData |> 
+                select(protest_attend, religion, religiondevout, socioeconclass, 
+                       incomeenough, race, education, age, leftrightscale,
+                       democracy_score, trust_score, economic_score, freedom_score) |>
+  na.omit() |>
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+#looking at data without NAs just to see which variables are most important
+
+
+rf_NAs <- ranger(protest_attend ~ . - protest_label -protest_engagement_score1,
+             data = protestDataClean13vars,
+             importance = "impurity")
+
+rf_NAs
+rf_NAs$confusion.matrix
+sort(rf_NAs$variable.importance)
+#prediction error: 35% , 65% accurate
+#predicting 0s (68.1% accurate), predicting 1s (69% accurate) 
+
+table(protestData$protest_attend)
+#about same amount of 0s/1s
+```
+When we filter out all NAs, we find that the most important variables in order of most to least important are: trust_score, age, economic_score,freedom_score, democracy_score,leftrightscale, socioeconclass, race, education, religiondevout, incomeenough, religion.
+
+
+
+Checking if there are NAs in the top 5 predictors from protestData
+```{r}
+colSums(is.na(protestData |> 
+                select(protest_attend, trust_score, age, economic_score,freedom_score, democracy_score)))
+```
+
+
+The variables protest_attend and freedom_score have NAs so we have to impute:
+```{r}
+set.seed(1)
+library(mice)
+
+imputedData <- mice(protestData |> select(freedom_score, protest_attend),
+                         method = "rf",
+                         seed = 1)
+
+completeData <- complete(imputedData)
+
+#fill in NAs with complete data
+protestData$freedom_score <- completeData$freedom_score
+protestData$protest_attend <- completeData$protest_attend
+ 
+
+#Check to see if there are still NAs
+protestDataClean13vars <- protestData |> 
+                select(protest_attend, religion, religiondevout, socioeconclass, 
+                       incomeenough, race, education, age, leftrightscale,
+                       democracy_score, trust_score, economic_score, freedom_score) |>
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+colSums(is.na(protestDataClean13vars |> 
+                select(protest_attend, freedom_score, trust_score, economic_score, democracy_score, age)))
+```
+Now that there are no more NAs in the original dataset, we will run random forest using the top 5 predictor variables
+
+
+```{r}
+set.seed(1)
+rf <- ranger(protest_attend ~ trust_score+age+economic_score+freedom_score+democracy_score,
+             data = protestDataClean13vars,
+             importance = "impurity")
+
+rf
+rf$confusion.matrix
+
+```
+We see that the prediction error is about the same when we ran random forest on the data that omitted the NAs. The model is slightly better at predicting 1s (63% right) vs predicting 0s (67% right).
+
+
+Instead of imputing data using mice, what if we did something more naive such as imputing data using mean/median?
+```{r}
+set.seed(1)
+#reload original protestData
+protestData <- read.csv("cleandata.csv")
+protestData <- protestData |> 
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+#select columns with NAs, find median, and update the columns in protestData
+protestDataNoNA <- protestData |>
+  select( freedom_score)
+
+medianFreedomScore <- median(protestDataNoNA$freedom_score)
+
+protestDataMedianAsNAs <- protestDataClean13vars |>
+    mutate(freedom_score = case_when(is.na(freedom_score) ~ medianFreedomScore, TRUE ~ freedom_score)) |>
+  filter(!is.na(protest_attend)) #gets rid of 6 missing protest_attend NA values instead of calculating median of a categorical variable
+
+rfMedians <- ranger(protest_attend ~ trust_score+age+economic_score+freedom_score+democracy_score,
+             data = protestDataMedianAsNAs,
+             importance = "impurity")
+
+rfMedians
+rfMedians$confusion.matrix
+```
+When imputing data with median values, the predictions are slightly worse (40.1% prediction error) when compared to models using imputed data.
+
+
+Training/testing RF with the imputed data from mice/complete since its slightly better
+```{r}
+#reloading protestData/protestDataClean13vars with imputed NA data
+protestData <- read.csv("stats0218_finaldata.csv")
+
+protestData <- protestData |> 
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+protestData$freedom_score <- completeData$freedom_score
+protestData$protest_attend <- completeData$protest_attend
+
+protestDataClean13vars <- protestData |> 
+                select(protest_attend, religion, religiondevout, socioeconclass, 
+                       incomeenough, race, education, age, leftrightscale,
+                       democracy_score, trust_score, economic_score, freedom_score) |>
+  mutate(across(c(protest_attend, religion, religiondevout, socioeconclass, incomeenough, race, education), as.factor))
+
+colSums(is.na(protestData |> 
+                select(protest_attend, freedom_score, trust_score, economic_score, democracy_score, age)))
+
+#training/testing
+set.seed(2)
+split <- sample(1:nrow(protestDataClean13vars), 0.5*nrow(protestDataClean13vars))
+train <- protestDataClean13vars[split,]
+test <- protestDataClean13vars[-split, ]
+
+rfTrain <- ranger(protest_attend ~ trust_score+age+economic_score+freedom_score+democracy_score,
+             data = train,
+             importance = "impurity")
+
+rfTrainPreds <- predict(rfTrain, data = test)
+table(rfTrainPreds$predictions, test$protest_attend)
+```
+From the table we see that:
+Predicting 0s: 65.4% accuracy
+Predicting 1s: 60.9% 
+Overall accuracy: 63%
+
+This tells us that the model has an overall accuracy of 63%, but is slightly better at predicting 0s (when someone does not attend the protest). An overall accuracy of 63% is better than average, but not by much. Instead of limiting our model to the 13 variables, our group decided to try using the entire dataset to see if other predictor variables might be better. 
+
+
+All current RF models aren't amazing. Decided to try using all variables from original data
+```{r}
+protestData <- read.csv("stats0218_finaldata.csv")
+
+#taking out NAs to see most important variables
+protestDataAllVars <- protestData |>
+  mutate(protest_attend = as.factor(protest_attend)) |>
+  filter(!is.na(protest_attend)) |>
+  na.omit() 
+
+rfAll <- ranger(protest_attend ~ . - protest_label - protest_engagement_score1,
+             data = protestDataAllVars,
+             importance = "impurity")
+  
+sort(rfAll$variable.importance)
+
+```
+Top 10 most important variables in order of most to least important: high_engagement, authdemonst, protestinsocmedia, talkoftenpolitics, protestagree, workforcommunity, nonauthdemonst
+, interestinpolitics, protestagree
+
+Imputing missing data
+#```{r}
+colSums(is.na(protestData |> 
+                select(protest_engagement_score1, high_engagement, authdemonst, protestinsocmedia, talkoftenpolitics, opinionplatform, workforcommunity, nonauthdemonst, interestinpolitics, protestagree, protest_attend)))
+
+library(mice)
+
+imputedDataAllVars <- mice(protestData |> select(protest_engagement_score1, high_engagement, authdemonst, protestinsocmedia, talkoftenpolitics, opinionplatform, workforcommunity, nonauthdemonst, interestinpolitics, protestagree, protest_attend),
+                         method = "rf",
+                         seed = 1)
+
+completeDataAllVars <- complete(imputedDataAllVars)
+
+#fill in NAs with complete data
+protestData$protest_engagement_score1 <- completeDataAllVars$protest_engagement_score1
+protestData$high_engagement <- completeDataAllVars$high_engagement
+protestData$authdemonst <- completeDataAllVars$authdemonst
+protestData$protestinsocmedia <- completeDataAllVars$protestinsocmedia
+protestData$talkoftenpolitics <- completeDataAllVars$talkoftenpolitics
+protestData$opinionplatform <- completeDataAllVars$opinionplatform
+protestData$workforcommunity <- completeDataAllVars$workforcommunity
+protestData$nonauthdemonst <- completeDataAllVars$nonauthdemonst
+protestData$interestinpolitics <- completeDataAllVars$interestinpolitics
+protestData$protestagree <- completeDataAllVars$protestagree
+protestData$protest_attend <- completeData$protest_attend
+ 
+
+#Check to see if there are still NAs
+colSums(is.na(protestData |> 
+                select(protest_attend, protest_engagement_score1, high_engagement, authdemonst, protestinsocmedia, talkoftenpolitics, opinionplatform, workforcommunity, nonauthdemonst, interestinpolitics, protestagree)))
+
+#```
+No more NAs moving onto RF with top ten variables instead
+
+#```{r}
+rfTopTen <-  ranger(protest_attend ~ protest_engagement_score1 + high_engagement + authdemonst + protestinsocmedia + talkoftenpolitics + opinionplatform + workforcommunity + nonauthdemonst + interestinpolitics + protestagree ,
+             data = protestData,
+             importance = "impurity")
+
+rfTopTen
+rfTopTen$confusion.matrix
+#```
+Almost perfect prediction (0.03% error)
+Gets 1s almost perfectly (9599 out of 9600 correct) and 0s (9601 out of 9605 correct)
+
+
