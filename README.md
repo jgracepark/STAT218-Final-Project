@@ -10,4 +10,6 @@ We used a Random Forest and Logistic Regression model on survey data to predict 
 
 ### Files
 - [View the Report (HTML)](./finalProject.html)
-- [R Markdown Source Code](./finalProject.Rmd)
+- [View the Report (PDF)](./finalProject.pdf)
+- [R Markdown Code](./finalProject.Rmd)
+- [Dataset](./stats0218_finaldata.csv)
