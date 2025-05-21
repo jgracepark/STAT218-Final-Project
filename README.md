@@ -3,7 +3,7 @@
 This repository contains Amuna, YiJun, and Grace's final project for **STAT 218: Statistical Learning**.
 
 ### Research Question:
-Can individual attitudes toward democracy, institutions, and freedom predict whether someone is likely to participate in a protest?
+Can individual attitudes toward democracy, economy, trust and freedom predict whether someone is likely to participate in a protest?
 
 ### Data
 The data is from 2023 (post-protest), from the Latinobarómetro, a regional public opinion survey conducted annually across 18 Latin American countries. The survey covers a wide range of political, economic, and social topics and includes a nationally representative sample of approximately 1,200 respondents in Chile.
@@ -16,8 +16,8 @@ between citizens and the state (especially when they occur amid strong economic 
 Our findings suggest that perceptions of the economy are particularly strong predictors of Chileans’ likelihood to protest, based on results from both random forest and logistic regression models.
 
 ### Files
-- [View the Report (HTML)](./finalProject.html)
-- [View the Report (PDF)](./finalProject.pdf)
-- [R Markdown Code](./finalProject.Rmd)
+- [View the Report (HTML)](./FINAL.html)
+- [View the Report (PDF)](./FINAL.pdf)
+- [R Markdown Code](./FINAL.Rmd)
 - [Cleaned Dataset](./stats0218_finaldata.csv)
 - [Original Dataset](./2023_renamed.dta) 
